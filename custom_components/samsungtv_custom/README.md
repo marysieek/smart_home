@@ -20,6 +20,7 @@ media_player:
     name: NAME_HERE
     port: PORT_HERE
     password: TOKEN_HERE
+    mac: MAC_HERE
 ```
 
 3. Update your config file with your token.

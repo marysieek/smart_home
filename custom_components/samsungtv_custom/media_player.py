@@ -3,7 +3,7 @@ import logging
 from datetime import timedelta
 import voluptuous as vol
 
-from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT, CONF_TIMEOUT, CONF_PASSWORD, STATE_ON, STATE_OFF
+from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT, CONF_TIMEOUT, CONF_PASSWORD, CONF_MAC, STATE_ON, STATE_OFF
 from homeassistant.components.media_player import (
     MediaPlayerDevice, PLATFORM_SCHEMA)
 from homeassistant.util import dt as dt_util
@@ -18,6 +18,8 @@ DEFAULT_NAME = 'Samsung TV Remote'
 DEFAULT_PORT = 8002
 DEFAULT_TIMEOUT = 1
 DEFAULT_PASSWORD = ''
+DEFAULT_MAC = ''
+
 SUPPORT_SAMSUNGTV = SUPPORT_PAUSE | SUPPORT_VOLUME_STEP | \
     SUPPORT_VOLUME_MUTE | SUPPORT_PREVIOUS_TRACK | \
     SUPPORT_NEXT_TRACK | SUPPORT_TURN_OFF | SUPPORT_PLAY | SUPPORT_PLAY_MEDIA | \
@@ -29,6 +31,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
     vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.positive_int,
     vol.Optional(CONF_PASSWORD, default=DEFAULT_PASSWORD): cv.string,
+    vol.Optional(CONF_MAC, default=DEFAULT_MAC): cv.string,
 })
 
 
@@ -39,25 +42,30 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     port = config[CONF_PORT]
     timeout = config[CONF_TIMEOUT]
     token = config[CONF_PASSWORD]
-    add_devices([ExampleMediaPlayer(host, name, port, timeout, token)])
+    mac = config[CONF_MAC]
+    add_devices([SamsungTVCustomMediaPlayer(
+        host, name, port, timeout, token, mac)])
 
 
-class ExampleMediaPlayer(MediaPlayerDevice):
+class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
     """Representation of a Media Player."""
 
-    def __init__(self, host, name, port, timeout, token):
+    def __init__(self, host, name, port, timeout, token, mac):
         from samsungtv import SamsungTV
+        import wakeonlan
         # Save a reference to the imported classes
         self._remote_class = SamsungTV
         self._remote = None
         """Initialize the media player."""
-        self._state = None
+        self._state = STATE_OFF
         self._host = host
         self._name = name
         self._port = port
         self._timeout = timeout
         self._token = token
+        self._mac = mac
         self._end_of_power_off = None
+        self._wol = wakeonlan
 
     def get_remote(self):
         """Create or return a remote control instance."""
@@ -70,9 +78,6 @@ class ExampleMediaPlayer(MediaPlayerDevice):
     def _power_off_in_progress(self):
         return self._end_of_power_off is not None and \
             self._end_of_power_off > dt_util.utcnow()
-
-    def send_key(self, key):
-        self.get_remote().send_key(key)
 
     def send_key(self, key):
         """Send a key to the tv and handles exceptions."""
@@ -93,6 +98,7 @@ class ExampleMediaPlayer(MediaPlayerDevice):
         except OSError:
             self._state = STATE_OFF
             self._remote = None
+        self._state = STATE_ON
         if self._power_off_in_progress():
             self._state = STATE_OFF
 
@@ -108,12 +114,17 @@ class ExampleMediaPlayer(MediaPlayerDevice):
 
     def turn_off(self):
         """Turn off media player."""
-        self._end_of_power_off = dt_util.utcnow() + timedelta(seconds=15)
+        _LOGGER.info("Turning off")
+        self._end_of_power_off = dt_util.utcnow() + timedelta(seconds=3)
         self.send_key('KEY_POWER')
 
     def turn_on(self):
-        """Turn the media player on."""
-        self.send_key('KEY_POWER')
+        _LOGGER.info("Turning on")
+        if self._mac:
+            self._wol.send_magic_packet(self._mac)
+            self._state = STATE_ON
+        else:
+            self.send_key('KEY_POWER')
 
     @property
     def name(self):
