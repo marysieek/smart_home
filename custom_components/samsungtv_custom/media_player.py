@@ -2,6 +2,7 @@ import homeassistant.helpers.config_validation as cv
 import logging
 from datetime import timedelta
 import voluptuous as vol
+import os
 
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT, CONF_TIMEOUT, CONF_PASSWORD, CONF_MAC, STATE_ON, STATE_OFF
 from homeassistant.components.media_player import (
@@ -53,11 +54,12 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
     def __init__(self, host, name, port, timeout, token, mac):
         from samsungtv import SamsungTV
         import wakeonlan
+        response = os.system("ping -c 1 " + host + " > /dev/null 2>&1")
         # Save a reference to the imported classes
         self._remote_class = SamsungTV
         self._remote = None
         """Initialize the media player."""
-        self._state = STATE_OFF
+        self._state = STATE_OFF if response else STATE_ON
         self._host = host
         self._name = name
         self._port = port
@@ -115,12 +117,13 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
     def turn_off(self):
         """Turn off media player."""
         _LOGGER.info("Turning off")
-        self._end_of_power_off = dt_util.utcnow() + timedelta(seconds=3)
+        self._end_of_power_off = dt_util.utcnow() + timedelta(seconds=1)
         self.send_key('KEY_POWER')
 
     def turn_on(self):
         _LOGGER.info("Turning on")
         if self._mac:
+            _LOGGER.info("Sending magic packet")
             self._wol.send_magic_packet(self._mac)
             self._state = STATE_ON
         else:
