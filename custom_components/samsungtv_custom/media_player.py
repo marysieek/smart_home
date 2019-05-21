@@ -3,6 +3,8 @@ import logging
 from datetime import timedelta
 import voluptuous as vol
 import os
+import threading
+import random
 
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT, CONF_TIMEOUT, CONF_PASSWORD, CONF_MAC, STATE_ON, STATE_OFF
 from homeassistant.components.media_player import (
@@ -36,6 +38,10 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 })
 
 
+def check_state(host):
+  os.system("ping -c 1 " + host + " > /dev/null 2>&1")
+
+
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the media player platform."""
     host = config[CONF_HOST]
@@ -54,7 +60,8 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
     def __init__(self, host, name, port, timeout, token, mac):
         from samsungtv import SamsungTV
         import wakeonlan
-        response = os.system("ping -c 1 " + host + " > /dev/null 2>&1")
+        response = check_state(host)
+        _LOGGER.info("====SAMSUNG %s", response)
         # Save a reference to the imported classes
         self._remote_class = SamsungTV
         self._remote = None
@@ -68,6 +75,7 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
         self._mac = mac
         self._end_of_power_off = None
         self._wol = wakeonlan
+        self._playing = True
 
     def get_remote(self):
         """Create or return a remote control instance."""
@@ -128,6 +136,42 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
             self._state = STATE_ON
         else:
             self.send_key('KEY_POWER')
+
+    def volume_up(self):
+        """Volume up the media player."""
+        self.send_key('KEY_VOLUP')
+
+    def volume_down(self):
+        """Volume down media player."""
+        self.send_key('KEY_VOLDOWN')
+
+    def mute_volume(self, mute):
+        """Send mute command."""
+        self.send_key('KEY_MUTE')
+
+    def media_play_pause(self):
+        """Simulate play pause media player."""
+        if self._playing:
+            self.media_pause()
+        else:
+            self.media_play()
+
+    async def async_play_media(self, media_type, media_id, **kwargs):
+        """Support changing a channel."""
+        if media_type != MEDIA_TYPE_CHANNEL:
+            _LOGGER.error('Unsupported media type')
+            return
+
+        # media_id should only be a channel number
+        try:
+            cv.positive_int(media_id)
+        except vol.Invalid:
+            _LOGGER.error('Media ID must be positive integer')
+            return
+
+        for digit in media_id:
+            await self.hass.async_add_job(self.send_key, 'KEY_' + digit)
+            await asyncio.sleep(KEY_PRESS_TIMEOUT, self.hass.loop)
 
     @property
     def name(self):
