@@ -39,7 +39,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 
 
 def check_state(host):
-  os.system("ping -c 1 " + host + " > /dev/null 2>&1")
+  return os.system("ping -c 1 " + host + " > /dev/null 2>&1")
 
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
@@ -91,10 +91,14 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
 
     def send_key(self, key):
         """Send a key to the tv and handles exceptions."""
-        if self._power_off_in_progress() \
-                and key not in ('KEY_POWER', 'KEY_POWEROFF'):
-            _LOGGER.info("TV is powering off, not sending command: %s", key)
-            return
+        if self._power_off_in_progress():
+            if key not in ('KEY_POWER', 'KEY_POWEROFF'):
+                _LOGGER.info(
+                    "TV is powering off, not sending command: %s", key)
+            else:
+              self.get_remote().send_key(key)
+              self._state = STATE_OFF
+        return
         try:
             # recreate connection if connection was dead
             retry_count = 1
@@ -109,8 +113,6 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
             self._state = STATE_OFF
             self._remote = None
         self._state = STATE_ON
-        if self._power_off_in_progress():
-            self._state = STATE_OFF
 
     def media_play(self):
         """Send play command."""
