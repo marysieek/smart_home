@@ -1,12 +1,15 @@
+import asyncio
 import homeassistant.helpers.config_validation as cv
+from homeassistant import util
 import logging
 from datetime import timedelta
 import voluptuous as vol
 import os
 import threading
-import random
 
-from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT, CONF_TIMEOUT, CONF_PASSWORD, CONF_MAC, STATE_ON, STATE_OFF
+from homeassistant.const import (
+    CONF_HOST, CONF_NAME, CONF_PORT, CONF_TIMEOUT, CONF_PASSWORD, CONF_MAC, STATE_ON, STATE_OFF,
+    STATE_PLAYING)
 from homeassistant.components.media_player import (
     MediaPlayerDevice, PLATFORM_SCHEMA)
 from homeassistant.util import dt as dt_util
@@ -22,6 +25,8 @@ DEFAULT_PORT = 8002
 DEFAULT_TIMEOUT = 1
 DEFAULT_PASSWORD = ''
 DEFAULT_MAC = ''
+MIN_TIME_BETWEEN_SCANS = timedelta(seconds=10)
+MIN_TIME_BETWEEN_FORCED_SCANS = timedelta(seconds=1)
 
 SUPPORT_SAMSUNGTV = SUPPORT_PAUSE | SUPPORT_VOLUME_STEP | \
     SUPPORT_VOLUME_MUTE | SUPPORT_PREVIOUS_TRACK | \
@@ -41,7 +46,6 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 def check_state(host):
   return os.system("ping -c 1 " + host + " > /dev/null 2>&1")
 
-
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the media player platform."""
     host = config[CONF_HOST]
@@ -53,19 +57,17 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     add_devices([SamsungTVCustomMediaPlayer(
         host, name, port, timeout, token, mac)])
 
-
 class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
     """Representation of a Media Player."""
 
     def __init__(self, host, name, port, timeout, token, mac):
         from samsungtv import SamsungTV
         import wakeonlan
-        response = check_state(host)
-        _LOGGER.info("====SAMSUNG %s", response)
         # Save a reference to the imported classes
+        response = check_state(host)
+        """Initialize the media player."""
         self._remote_class = SamsungTV
         self._remote = None
-        """Initialize the media player."""
         self._state = STATE_OFF if response else STATE_ON
         self._host = host
         self._name = name
@@ -76,6 +78,19 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
         self._end_of_power_off = None
         self._wol = wakeonlan
         self._playing = True
+
+    @util.Throttle(MIN_TIME_BETWEEN_SCANS, MIN_TIME_BETWEEN_FORCED_SCANS)
+    def update(self):
+        """Retrieve the latest data."""
+        from websockets.exceptions import ConnectionClosed
+        try:
+            response = check_state(self._host)
+            self._state = STATE_OFF if response else STATE_ON
+
+        except (OSError, ConnectionClosed, TypeError,
+                asyncio.TimeoutError):
+            self._state = STATE_OFF
+            _LOGGER.info("SamsungTV off by error")
 
     def get_remote(self):
         """Create or return a remote control instance."""
@@ -109,7 +124,8 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
                 except:
                     self._remote = None
             self._state = STATE_ON
-        except OSError:
+        except (OSError, ConnectionClosed, TypeError,
+                asyncio.TimeoutError):
             self._state = STATE_OFF
             self._remote = None
         self._state = STATE_ON
@@ -124,12 +140,6 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
         self._playing = False
         self.send_key('KEY_PAUSE')
 
-    def turn_off(self):
-        """Turn off media player."""
-        _LOGGER.info("Turning off")
-        self._end_of_power_off = dt_util.utcnow() + timedelta(seconds=1)
-        self.send_key('KEY_POWER')
-
     def turn_on(self):
         _LOGGER.info("Turning on")
         if self._mac:
@@ -138,6 +148,12 @@ class SamsungTVCustomMediaPlayer(MediaPlayerDevice):
             self._state = STATE_ON
         else:
             self.send_key('KEY_POWER')
+
+    def turn_off(self):
+        """Turn off media player."""
+        _LOGGER.info("Turning off")
+        self._end_of_power_off = dt_util.utcnow() + timedelta(seconds=1)
+        self.send_key('KEY_POWER')
 
     def volume_up(self):
         """Volume up the media player."""
